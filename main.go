@@ -2,9 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"strings"
 )
 
 type apiConfigData struct {
@@ -14,7 +15,7 @@ type apiConfigData struct {
 type weatherData struct {
 	Name string `json:"name"`
 	Main struct {
-		temp float64 `json:"temperature"`
+		Temp float64 `json:"temp"`
 	} `json:"main"`
 }
 
@@ -31,10 +32,34 @@ func loadApiConfig(filename string) (apiConfigData, error) {
 	}
 	return c, nil
 }
-func main() {
-	cred, err := loadApiConfig(".apiConfig")
+func query_api(city string) (weatherData, error) {
+	apiConfig, err := loadApiConfig(".apiConfig")
 	if err != nil {
-		log.Fatal("Error loading config")
+		return weatherData{}, err
 	}
-	fmt.Println(cred.ApiKey)
+	resp, err := http.Get("http://api.openweathermap.org/data/2.5/weather?APPID=" + apiConfig.ApiKey + "&q=" + city)
+	if err != nil {
+		return weatherData{}, err
+	}
+	defer resp.Body.Close()
+	var d weatherData
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return weatherData{}, err
+	}
+	return d, nil
+}
+func main() {
+	http.HandleFunc("/weather/",
+		func(w http.ResponseWriter, r *http.Request) {
+			city := strings.SplitN(r.URL.Path, "/", 3)[2]
+			data, err := query_api(city)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(data)
+		})
+
+	http.ListenAndServe(":8080", nil)
 }
